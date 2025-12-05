@@ -335,24 +335,30 @@ h2 {
   }
   
   #board {
-    flex: 1;
-    width: min(calc(100vw - 16px), calc(100vh - 120px));
-    height: min(calc(100vw - 16px), calc(100vh - 120px));
+    flex-shrink: 0;
+    /* 移动端尺寸由JavaScript动态计算 */
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     grid-template-rows: repeat(8, 1fr);
-    gap: 3px;
+    gap: 6px;
     margin-top: 6px;
     margin-left: auto;
     margin-right: auto;
-    min-width: 0;
-    min-height: 0;
+    box-sizing: border-box;
   }
   
   .tile {
     width: 100%;
     height: 100%;
+    min-width: 0;
+    min-height: 0;
     border-radius: 8px;
+    box-sizing: border-box;
+    /* 移动端减小边框和阴影，避免重叠 */
+    border-width: 2px !important;
+    box-shadow:
+      0 0 0 2px white,
+      0 0 0 3px rgba(0,0,0,0.1) !important;
   }
 }
 </style>
@@ -428,8 +434,7 @@ const BGM_FILES = [
   "sounds/bgm1.mp3",
   "sounds/bgm2.mp3",
   "sounds/bgm3.mp3",
-  "sounds/bgm4.mp3",
-  "sounds/bgm5.mp3"
+  "sounds/bgm4.mp3"
 ];
 
 let bgm = new Audio();
@@ -437,20 +442,46 @@ bgm.loop = true;
 bgm.volume = 0.6;
 
 const SFX = {
-  click: new Audio("sounds/click.mp3"),
-  match: new Audio("sounds/match.mp3"),
-  bomb:  new Audio("sounds/bomb.mp3")
+  click: "sounds/click.mp3",
+  match: "sounds/match.mp3",
+  bomb:  "sounds/bomb.mp3"
 };
 
-Object.values(SFX).forEach(a => {
-  a.volume = 0.85;
+// 预加载音频
+const audioCache = {};
+Object.keys(SFX).forEach(key => {
+  const audio = new Audio(SFX[key]);
+  audio.volume = 0.85;
+  audio.preload = "auto";
+  audioCache[key] = audio;
+  
+  // 监听加载错误
+  audio.addEventListener('error', (e) => {
+    console.error(`音频加载失败: ${SFX[key]}`, e);
+  });
 });
 
 let musicOn = true;
 let soundOn  = true;
+let audioUnlocked = false; // 音频是否已解锁（需要用户交互）
 
 const musicBtn = document.getElementById("music-btn");
 const sfxBtn   = document.getElementById("sfx-btn");
+
+// 解锁音频播放（需要在用户交互后调用）
+function unlockAudio() {
+  if (audioUnlocked) return;
+  
+  // 尝试播放一个静音的音频来解锁
+  const testAudio = new Audio();
+  testAudio.volume = 0;
+  testAudio.play().then(() => {
+    audioUnlocked = true;
+    testAudio.pause();
+  }).catch(() => {
+    // 忽略错误
+  });
+}
 
 function playRandomBGM() {
   if (!musicOn) return;
@@ -486,10 +517,49 @@ function updateSoundButtons() {
 
 function playSFX(key) {
   if (!soundOn) return;
-  const a = SFX[key];
-  if (!a) return;
-  a.currentTime = 0;
-  a.play().catch(() => {});
+  
+  // 首次播放时解锁音频
+  if (!audioUnlocked) {
+    unlockAudio();
+  }
+  
+  const audio = audioCache[key];
+  if (!audio) {
+    console.warn(`音效不存在: ${key}`);
+    return;
+  }
+  
+  try {
+    // 检查音频是否已加载，如果未加载则加载
+    if (audio.readyState < 2) {
+      audio.load();
+    }
+    
+    // 克隆音频对象，避免重复播放冲突
+    const audioClone = audio.cloneNode();
+    audioClone.volume = 0.85;
+    audioClone.currentTime = 0;
+    
+    // 播放并处理错误
+    const playPromise = audioClone.play();
+    if (playPromise !== undefined) {
+      playPromise.catch((error) => {
+        console.error(`播放音效失败: ${key}`, error);
+        // 如果播放失败，尝试创建新的音频对象
+        try {
+          const newAudio = new Audio(SFX[key]);
+          newAudio.volume = 0.85;
+          newAudio.play().catch((e) => {
+            console.error(`重新播放音效失败: ${key}`, e);
+          });
+        } catch (e) {
+          console.error(`创建音频对象失败: ${key}`, e);
+        }
+      });
+    }
+  } catch (error) {
+    console.error(`播放音效异常: ${key}`, error);
+  }
 }
 
 // 震动功能
@@ -504,8 +574,9 @@ function vibrate(pattern) {
 }
 
 /* ============================ 全局游戏状态 ============================ */
-const ROWS = 8;
-const COLS = 8;
+// 移动端使用6x6，桌面端使用8x8
+let ROWS = window.innerWidth <= 480 ? 6 : 8;
+let COLS = window.innerWidth <= 480 ? 6 : 8;
 const TILE_TYPES = 6;
 
 // 图片资源 - 动态发现img文件夹中的图片
@@ -646,6 +717,9 @@ function updateHUD() {
 
 /* ============================ 开始游戏 ============================ */
 async function startGame() {
+  // 解锁音频播放（用户点击开始按钮时）
+  unlockAudio();
+  
   // 如果还没有发现图片，先发现图片
   if (AVAILABLE_IMAGES.length === 0) {
     await discoverImages();
@@ -661,10 +735,26 @@ async function startGame() {
   waitingNextLevel = false;
   assignRandomImages(); // 随机分配图片
   updateHUD();
+  
+  // 调整移动端棋盘尺寸
+  setTimeout(adjustBoardSize, 50);
   initBoard();
 
+  // 预加载并测试音频（用户交互后可以播放）
+  preloadAudio();
+  
   playRandomBGM();
   updateSoundButtons();
+}
+
+// 预加载音频
+function preloadAudio() {
+  Object.keys(audioCache).forEach(key => {
+    const audio = audioCache[key];
+    if (audio.readyState === 0) {
+      audio.load();
+    }
+  });
 }
 
 /* ============================ 棋盘初始化 ============================ */
@@ -1125,13 +1215,95 @@ function nextLevel() {
   levelOverlay.style.display = "none";
   assignRandomImages(); // 每关重新随机分配图片
   updateHUD();
+  setTimeout(adjustBoardSize, 50);
   initBoard();
+}
+
+// 动态调整移动端棋盘尺寸
+function adjustBoardSize() {
+  const board = document.getElementById("board");
+  if (!board) return;
+  
+  const isMobile = window.innerWidth <= 480;
+  
+  // 更新行列数
+  ROWS = isMobile ? 6 : 8;
+  COLS = isMobile ? 6 : 8;
+  
+  // 设置grid布局
+  board.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+  board.style.gridTemplateRows = `repeat(${ROWS}, 1fr)`;
+  
+  if (isMobile) {
+    // 获取实际头部区域高度
+    const headerRow = document.querySelector('.header-row');
+    const hud = document.querySelector('.hud');
+    const headerHeight = (headerRow ? headerRow.offsetHeight : 50) + 
+                         (hud ? hud.offsetHeight : 50) + 20;
+    
+    // 计算可用空间，减小边距让棋盘更大
+    const padding = 12; // 左右padding，减小边距
+    const margin = 12; // 上下margin，减小边距
+    const availableWidth = window.innerWidth - padding * 2;
+    const availableHeight = window.innerHeight - headerHeight - margin * 2;
+    
+    // 使用更合理的计算，取90%确保不会溢出
+    const maxSize = Math.floor(Math.min(availableWidth, availableHeight) * 0.9);
+    
+    // 考虑gap：6个格子需要5个gap，每个gap 6px = 30px
+    const gapTotal = (COLS - 1) * 6; // gap数量 = 列数-1
+    const tileSize = Math.floor((maxSize - gapTotal) / COLS);
+    
+    // 如果计算出的方块太小，至少保证最小尺寸
+    if (tileSize < 20) {
+      const minTileSize = 20;
+      const finalSize = minTileSize * COLS + gapTotal;
+      board.style.width = finalSize + 'px';
+      board.style.height = finalSize + 'px';
+    } else {
+      // 根据方块大小反推总尺寸
+      const finalSize = tileSize * COLS + gapTotal;
+      board.style.width = finalSize + 'px';
+      board.style.height = finalSize + 'px';
+    }
+  } else {
+    // 非移动端清除内联样式，使用CSS
+    board.style.width = '';
+    board.style.height = '';
+    board.style.gridTemplateColumns = '';
+    board.style.gridTemplateRows = '';
+  }
 }
 
 // 页面加载时自动发现图片
 (async function() {
   await discoverImages();
   console.log('发现图片:', AVAILABLE_IMAGES.length, '张');
+  
+  // 调整棋盘尺寸
+  adjustBoardSize();
+  
+  let lastIsMobile = window.innerWidth <= 480;
+  window.addEventListener('resize', () => {
+    const currentIsMobile = window.innerWidth <= 480;
+    // 如果移动端/桌面端切换，需要重新初始化棋盘
+    if (currentIsMobile !== lastIsMobile && document.getElementById("game-ui").style.display === "block") {
+      initBoard();
+    }
+    lastIsMobile = currentIsMobile;
+    adjustBoardSize();
+  });
+  
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => {
+      const currentIsMobile = window.innerWidth <= 480;
+      if (currentIsMobile !== lastIsMobile && document.getElementById("game-ui").style.display === "block") {
+        initBoard();
+      }
+      lastIsMobile = currentIsMobile;
+      adjustBoardSize();
+    }, 100);
+  });
 })();
 </script>
 
