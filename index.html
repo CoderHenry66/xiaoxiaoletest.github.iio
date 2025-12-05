@@ -157,7 +157,7 @@ h2 {
   display: grid;
   grid-template-columns: repeat(8, 64px);
   grid-template-rows: repeat(8, 64px);
-  gap: 6px;
+  gap: 8px;
   user-select: none;
 }
 
@@ -167,6 +167,7 @@ h2 {
   height: 64px;
   background-size: cover;
   background-position: center;
+  box-sizing: border-box; /* 确保border包含在尺寸内 */
 
   border-radius: 16px;
   position: relative;
@@ -176,17 +177,17 @@ h2 {
 
   /* 卡通厚描边 */
   box-shadow:
-    0 0 0 4px white,
-    0 0 0 6px rgba(0,0,0,0.15);
+    0 0 0 3px white,
+    0 0 0 4px rgba(0,0,0,0.15);
 }
 
 /* 悬浮高亮（PC） */
 @media (hover: hover) {
   .tile:hover {
-    transform: scale(1.1);
+    transform: scale(1.08);
     box-shadow:
-      0 0 0 4px white,
-      0 0 0 8px rgba(255, 170, 220, 0.6);
+      0 0 0 3px white,
+      0 0 0 6px rgba(255, 170, 220, 0.6);
   }
 }
 
@@ -230,10 +231,10 @@ h2 {
 
 /* 选中高亮 */
 .selected {
-  transform: scale(1.12);
+  transform: scale(1.08);
   box-shadow:
-    0 0 0 6px white,
-    0 0 0 10px rgba(255, 170, 220, 0.9);
+    0 0 0 3px white,
+    0 0 0 6px rgba(255, 170, 220, 0.9);
 }
 
 /* ======================= 消除 + 下落动画 ======================= */
