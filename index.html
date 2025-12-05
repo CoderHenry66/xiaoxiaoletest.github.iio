@@ -832,12 +832,19 @@ function render() {
       div.dataset.row = r;
       div.dataset.col = c;
 
-      // PC 鼠标
-      div.addEventListener("mousedown", pointerDown);
-      div.addEventListener("click", tileClick);
+      // PC 鼠标事件
+      div.addEventListener("mousedown", pointerDown, { passive: true });
+      div.addEventListener("click", tileClick, { passive: true });
 
-      // 手机触摸
+      // 手机触摸事件 - 使用 passive: false 以便 preventDefault
       div.addEventListener("touchstart", pointerDown, { passive: false });
+      
+      // 阻止触摸时的默认行为（如滚动）
+      div.addEventListener("touchmove", (e) => {
+        if (dragStart) {
+          e.preventDefault();
+        }
+      }, { passive: false });
 
       boardEl.appendChild(div);
     }
@@ -847,6 +854,12 @@ function render() {
 /* ============================ 点击选中/交换 ============================ */
 function tileClick(e) {
   if (isProcessing) return;
+  
+  // 如果已经移动过（触摸滑动），不处理 click 事件
+  if (hasMoved) {
+    hasMoved = false;
+    return;
+  }
 
   const r = parseInt(e.currentTarget.dataset.row);
   const c = parseInt(e.currentTarget.dataset.col);
@@ -866,6 +879,7 @@ function tileClick(e) {
 
 /* ============================ 统一拖动（鼠标 + 触摸） ============================ */
 let dragStart = null;
+let hasMoved = false; // 标记是否已经移动，避免触发 click 事件
 
 function pointerDown(e) {
   if (isProcessing) return;
@@ -877,25 +891,43 @@ function pointerDown(e) {
   const c = parseInt(e.currentTarget.dataset.col);
 
   dragStart = { r, c, x: point.clientX, y: point.clientY };
+  hasMoved = false; // 重置移动标记
 
-  if (isTouch) e.preventDefault();
+  if (isTouch) {
+    e.preventDefault();
+    e.stopPropagation(); // 阻止事件冒泡，避免触发 click
+  }
 
-  window.addEventListener("mousemove", pointerMove);
-  window.addEventListener("mouseup", pointerUp);
-  window.addEventListener("touchmove", pointerMove, { passive: false });
-  window.addEventListener("touchend", pointerUp);
+  // 使用更可靠的事件绑定方式
+  if (isTouch) {
+    window.addEventListener("touchmove", pointerMove, { passive: false, once: false });
+    window.addEventListener("touchend", pointerUp, { passive: false, once: false });
+    window.addEventListener("touchcancel", pointerUp, { passive: false, once: false });
+  } else {
+    window.addEventListener("mousemove", pointerMove, { once: false });
+    window.addEventListener("mouseup", pointerUp, { once: false });
+  }
 }
 
 function pointerMove(e) {
   if (!dragStart) return;
 
   const isTouch = e.type === "touchmove";
-  const point = isTouch ? e.touches[0] : e;
-  if (isTouch) e.preventDefault();
+  const point = isTouch ? (e.touches[0] || e.changedTouches[0]) : e;
+  
+  if (isTouch) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
 
   const dx = point.clientX - dragStart.x;
   const dy = point.clientY - dragStart.y;
   const threshold = 28;
+
+  // 如果移动距离超过阈值，标记为已移动
+  if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
+    hasMoved = true;
+  }
 
   if (Math.abs(dx) > Math.abs(dy)) {
     if (dx > threshold) {
@@ -912,16 +944,25 @@ function pointerMove(e) {
   }
 }
 
-function pointerUp() {
+function pointerUp(e) {
+  if (e && e.type === "touchend") {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  
   dragStart = null;
+  
+  // 移除所有事件监听器
   window.removeEventListener("mousemove", pointerMove);
   window.removeEventListener("mouseup", pointerUp);
   window.removeEventListener("touchmove", pointerMove);
   window.removeEventListener("touchend", pointerUp);
+  window.removeEventListener("touchcancel", pointerUp);
 }
 
 function trySwipe(r1, c1, r2, c2) {
-  dragStart = null;
+  if (!dragStart) return; // 防止重复触发
+  dragStart = null; // 立即清除，防止重复触发
   if (r2 < 0 || r2 >= ROWS || c2 < 0 || c2 >= COLS) return;
   playSFX("click");
   trySwap(r1, c1, r2, c2);
@@ -1276,13 +1317,29 @@ function adjustBoardSize() {
   }
 }
 
+// 全局错误处理
+window.addEventListener('error', (e) => {
+  console.error('全局错误:', e.error);
+});
+
+// 触摸事件支持检测
+if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+  console.log('触摸事件支持: 是');
+} else {
+  console.log('触摸事件支持: 否');
+}
+
 // 页面加载时自动发现图片
 (async function() {
-  await discoverImages();
-  console.log('发现图片:', AVAILABLE_IMAGES.length, '张');
-  
-  // 调整棋盘尺寸
-  adjustBoardSize();
+  try {
+    await discoverImages();
+    console.log('发现图片:', AVAILABLE_IMAGES.length, '张');
+    
+    // 调整棋盘尺寸
+    adjustBoardSize();
+  } catch (error) {
+    console.error('初始化错误:', error);
+  }
   
   let lastIsMobile = window.innerWidth <= 480;
   window.addEventListener('resize', () => {
